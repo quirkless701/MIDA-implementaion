@@ -1,0 +1,100 @@
+import random
+import numpy as np
+from scipy.optimize import minimize
+
+# Trader class
+class Trader:
+    def __init__(self, trader_id, is_buyer, goods_valuation, endowment):
+        self.trader_id = trader_id
+        self.is_buyer = is_buyer
+        self.goods_valuation = goods_valuation  # A dictionary with good: value pairs
+        self.endowment = endowment  # Initial endowment of goods
+        self.net_gain = 0
+        self.bundle = {good: 0 for good in goods_valuation.keys()}  # Bundle of goods bought or sold
+    
+    def utility(self, allocation):
+        # Cobb-Douglas utility function for simplicity
+        return np.prod([allocation[good] ** (value / sum(self.goods_valuation.values())) 
+                        for good, value in self.goods_valuation.items()])
+    
+    def budget_constraint(self, prices):
+        # Budget constraint: expenditure <= value of endowment
+        return sum(prices[good] * self.bundle[good] for good in prices) <= \
+               sum(prices[good] * self.endowment[good] for good in prices)
+
+# MIDA mechanism
+def mida_mechanism(traders, goods):
+    # Step 1: Halve the market randomly
+    left_market = []
+    right_market = []
+    for trader in traders:
+        if random.random() < 0.5:
+            left_market.append(trader)
+        else:
+            right_market.append(trader)
+    
+    # Step 2: Calculate Walrasian equilibrium prices for each sub-market
+    prices_left = calculate_walrasian_prices(left_market, goods)
+    prices_right = calculate_walrasian_prices(right_market, goods)
+    
+    # Step 3: Execute trades at the prices from the opposite market
+    print("Executing trades in the Left Market with Right Market prices")
+    execute_trades(left_market, prices_right, goods)
+    
+    print("\nExecuting trades in the Right Market with Left Market prices")
+    execute_trades(right_market, prices_left, goods)
+
+def calculate_walrasian_prices(market, goods):
+    # Initial guess for prices
+    initial_prices = np.ones(len(goods))
+    
+    # Objective function: Negative of total utility to maximize utility
+    def total_utility(prices):
+        total_utility = 0
+        for trader in market:
+            if trader.is_buyer:
+                allocation = {good: trader.endowment[good] / prices[i] for i, good in enumerate(goods)}
+                total_utility += trader.utility(allocation)
+        return -total_utility
+    
+    # Constraints: Market clearing for each good
+    constraints = []
+    for i, good in enumerate(goods):
+        def market_clearing_constraint(prices, good=good):
+            demand = sum(trader.endowment[good] / prices[i] for trader in market if trader.is_buyer)
+            supply = sum(trader.endowment[good] for trader in market if not trader.is_buyer)
+            return supply - demand
+        constraints.append({'type': 'eq', 'fun': market_clearing_constraint})
+    
+    # Bounds for prices: Prices should be positive
+    bounds = [(1e-3, None) for _ in goods]
+    
+    # Solve the optimization problem
+    result = minimize(total_utility, initial_prices, bounds=bounds, constraints=constraints)
+    
+    if result.success:
+        prices = {good: result.x[i] for i, good in enumerate(goods)}
+        return prices
+    else:
+        # If optimization fails, use default random prices
+        return {good: random.uniform(1, 10) for good in goods}
+
+def execute_trades(market, prices, goods):
+    for trader in market:
+        trader.trade(prices)
+        if trader.is_buyer:
+            print(f"Buyer {trader.trader_id} net gain: {trader.net_gain}, Bundle: {trader.bundle}")
+        else:
+            print(f"Seller {trader.trader_id} net gain: {trader.net_gain}, Bundle: {trader.bundle}")
+
+# Example setup
+goods = ["x", "y"]
+traders = [
+    Trader(1, True, {"x": 10, "y": 15}, {"x": 5, "y": 5}),
+    Trader(2, False, {"x": 5}, {"x": 10, "y": 0}),
+    Trader(3, True, {"x": 12, "y": 9}, {"x": 3, "y": 7}),
+    Trader(4, False, {"y": 7}, {"x": 0, "y": 8}),
+]
+
+# Run MIDA simulation
+mida_mechanism(traders, goods)
